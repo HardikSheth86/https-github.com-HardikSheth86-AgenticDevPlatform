@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { 
   AgentRole, 
   WorkflowStage, 
@@ -18,7 +18,7 @@ import Tabs from './components/Tabs';
 import Sidebar from './components/Sidebar';
 import SettingsModal from './components/SettingsModal';
 import DashboardStats from './components/DashboardStats';
-import { Send, FileText, CheckSquare, Code, PlayCircle, Layers, Github, Brain, GitPullRequest, Terminal, CheckCircle, CheckCircle2, Sparkles, AlertTriangle, UserCheck, ExternalLink, ArrowRight, XCircle, RotateCcw, MessageSquare, FolderPlus } from 'lucide-react';
+import { Send, FileText, Code, Brain, GitPullRequest, Terminal, CheckCircle, CheckCircle2, Sparkles, UserCheck, ExternalLink, ArrowRight, XCircle, RotateCcw, MessageSquare, FolderPlus, Rocket } from 'lucide-react';
 
 // Mock Data
 const MOCK_REPOS: Repository[] = [
@@ -77,12 +77,22 @@ export default function App() {
 
   const getActiveAgentRole = (currentStage: WorkflowStage): AgentRole | null => {
     switch (currentStage) {
-      case WorkflowStage.REQUIREMENTS: return AgentRole.PRODUCT_OWNER;
-      case WorkflowStage.PLANNING: return AgentRole.ARCHITECT;
+      case WorkflowStage.REQUIREMENTS: 
+      case WorkflowStage.APPROVE_REQUIREMENTS:
+        return AgentRole.PRODUCT_OWNER;
+      
+      case WorkflowStage.PLANNING: 
+      case WorkflowStage.APPROVE_PLANNING:
+        return AgentRole.ARCHITECT;
+      
       case WorkflowStage.CODING: return AgentRole.DEVELOPER;
       case WorkflowStage.REVIEW: return AgentRole.REVIEWER;
-      case WorkflowStage.CHECKS: return AgentRole.DEVOPS;
-      case WorkflowStage.AWAITING_APPROVAL: return AgentRole.PRODUCT_OWNER;
+      case WorkflowStage.APPROVE_CODE: return AgentRole.REVIEWER;
+      
+      case WorkflowStage.CHECKS: 
+      case WorkflowStage.APPROVE_PREVIEW:
+        return AgentRole.DEVOPS;
+      
       case WorkflowStage.DEPLOYING: return AgentRole.DEVOPS;
       default: return null;
     }
@@ -111,149 +121,196 @@ export default function App() {
     setIsRequestingChanges(false);
     setChangeRequestFeedback('');
 
-    await executeWorkflowSteps();
+    await runRequirements();
   };
 
-  const executeWorkflowSteps = async (resumeFromStage?: WorkflowStage) => {
-      try {
-        // 1. Requirements Gathering (Product Owner)
-        if (!resumeFromStage || resumeFromStage === WorkflowStage.REQUIREMENTS) {
-            addLog(AgentRole.PRODUCT_OWNER, `Analyzing request for ${selectedRepo ? selectedRepo.name : 'new project'}: "${input}"`);
-            const generatedStories = await geminiService.generateUserStories(input, selectedRepo || undefined);
-            setStories(generatedStories);
-            addLog(AgentRole.PRODUCT_OWNER, `Generated ${generatedStories.length} user stories.`, 'success');
-            await new Promise(r => setTimeout(r, 1500));
-        }
+  // PHASE 1: Requirements
+  const runRequirements = async () => {
+    setStage(WorkflowStage.REQUIREMENTS);
+    setActiveTab('stories');
+    try {
+      addLog(AgentRole.PRODUCT_OWNER, `Analyzing request for ${selectedRepo ? selectedRepo.name : 'new project'}: "${input}"`);
+      const generatedStories = await geminiService.generateUserStories(input + (changeRequestFeedback ? `\nFeedback: ${changeRequestFeedback}` : ''), selectedRepo || undefined);
+      setStories(generatedStories);
+      addLog(AgentRole.PRODUCT_OWNER, `Generated ${generatedStories.length} user stories.`, 'success');
+      setStage(WorkflowStage.APPROVE_REQUIREMENTS);
+    } catch (e: any) {
+      addLog(AgentRole.PRODUCT_OWNER, `Failed to generate stories: ${e.message}`, 'error');
+      setStage(WorkflowStage.IDLE);
+    }
+  };
 
-        // 2. Planning (Architect)
-        if (!resumeFromStage || resumeFromStage === WorkflowStage.PLANNING || resumeFromStage === WorkflowStage.REQUIREMENTS) {
-            setStage(WorkflowStage.PLANNING);
-            setActiveTab('tasks');
-            addLog(AgentRole.ARCHITECT, "Mapping stories to Jira tasks...");
-            // If resuming, we might pass existing stories + feedback, but for simplicity we regenerate tasks based on stories
-            // In a real app, we would feed the feedback into the prompt here
-            const generatedTasks = await geminiService.generateDevTasks(stories);
-            setTasks(generatedTasks);
-            addLog(AgentRole.ARCHITECT, `Created ${generatedTasks.length} tickets.`, 'success');
-            
-            const branchBase = generatedTasks[0]?.key.toLowerCase() || 'project';
-            const branchName = `feature/${branchBase}-v${Math.floor(Math.random() * 100)}`;
-            setFeatureBranch(branchName);
-            await new Promise(r => setTimeout(r, 1500));
-        }
+  // PHASE 2: Planning
+  const runPlanning = async () => {
+    setStage(WorkflowStage.PLANNING);
+    setActiveTab('tasks');
+    setChangeRequestFeedback(''); // Clear feedback
+    try {
+      addLog(AgentRole.ARCHITECT, "Mapping stories to Jira tasks...");
+      const generatedTasks = await geminiService.generateDevTasks(stories);
+      setTasks(generatedTasks);
+      addLog(AgentRole.ARCHITECT, `Created ${generatedTasks.length} tickets.`, 'success');
+      
+      const branchBase = generatedTasks[0]?.key.toLowerCase() || 'project';
+      const branchName = `feature/${branchBase}-v${Math.floor(Math.random() * 100)}`;
+      setFeatureBranch(branchName);
+      setStage(WorkflowStage.APPROVE_PLANNING);
+    } catch (e: any) {
+      addLog(AgentRole.ARCHITECT, `Failed to plan: ${e.message}`, 'error');
+    }
+  };
 
-        // 3. Coding (Developer)
-        setStage(WorkflowStage.CODING);
-        setActiveTab('code');
-        addLog(AgentRole.DEVELOPER, `Initializing workspace...`);
-        
-        // Fast forward tasks animation
-        for (const task of tasks) {
-            setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: 'IN_PROGRESS' } : t));
-            await new Promise(r => setTimeout(r, 400)); 
-        }
+  // PHASE 3: Coding & Testing
+  const runCoding = async () => {
+    setStage(WorkflowStage.CODING);
+    setActiveTab('code');
+    setChangeRequestFeedback('');
+    try {
+      addLog(AgentRole.DEVELOPER, `Initializing workspace on ${featureBranch}...`);
+      
+      // Fast forward tasks animation
+      for (const task of tasks) {
+          setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: 'IN_PROGRESS' } : t));
+          await new Promise(r => setTimeout(r, 200)); 
+      }
 
-        addLog(AgentRole.DEVELOPER, "Writing code implementation...");
-        const files = await geminiService.generateCode(tasks, input, selectedRepo || undefined);
-        setCodeFiles(files);
-        setTasks(prev => prev.map(t => ({ ...t, status: 'CODE_REVIEW' })));
-        addLog(AgentRole.DEVELOPER, `Implemented changes in ${files.length} files.`, 'success');
-        await new Promise(r => setTimeout(r, 1500));
+      addLog(AgentRole.DEVELOPER, "Writing code implementation...");
+      const files = await geminiService.generateCode(tasks, input, selectedRepo || undefined);
+      setCodeFiles(files);
+      setTasks(prev => prev.map(t => ({ ...t, status: 'CODE_REVIEW' })));
+      addLog(AgentRole.DEVELOPER, `Implemented changes in ${files.length} files.`, 'success');
+      await new Promise(r => setTimeout(r, 1000));
 
-        // 4. Review (Reviewer)
-        setStage(WorkflowStage.REVIEW);
-        setActiveTab('pr');
-        
-        const mockPr: PullRequest = {
+      // Unit Tests Simulation
+      addLog(AgentRole.DEVELOPER, "Generating unit tests...");
+      await new Promise(r => setTimeout(r, 800));
+      addLog(AgentRole.DEVELOPER, "Running unit tests: 12/12 passed.", 'success');
+
+      // Code Review
+      setStage(WorkflowStage.REVIEW);
+      setActiveTab('pr');
+      addLog(AgentRole.REVIEWER, "Running static code analysis...");
+      const codeReviews = await geminiService.reviewCode(files);
+      setReviews(codeReviews);
+      
+      if (codeReviews.length === 0 || codeReviews.every(r => r.severity === 'LOW')) {
+          addLog(AgentRole.REVIEWER, "Code review passed.", 'success');
+      } else {
+          addLog(AgentRole.REVIEWER, `Found ${codeReviews.length} issues to review.`, 'warning');
+      }
+      
+      setStage(WorkflowStage.APPROVE_CODE);
+    } catch (e: any) {
+      addLog(AgentRole.DEVELOPER, `Coding failed: ${e.message}`, 'error');
+    }
+  };
+
+  // PHASE 4: Build & Preview
+  const runChecks = async () => {
+    setStage(WorkflowStage.CHECKS);
+    setActiveTab('build');
+    setChangeRequestFeedback('');
+    
+    // Create Mock PR structure if not exists
+    if (!prDetails) {
+        setPrDetails({
             id: Math.floor(Math.random() * 1000).toString(),
             title: `Feature: ${input.substring(0, 40)}...`,
             fromBranch: featureBranch || 'feature/update',
             toBranch: selectedRepo?.branch || 'main',
             description: `Implements user stories: ${stories.map(s => s.id).join(', ')}`,
             status: 'OPEN',
-            filesChanged: files.length,
+            filesChanged: codeFiles.length,
             checks: [
             { name: 'ci/lint', status: 'PENDING' },
             { name: 'ci/test', status: 'PENDING' },
             { name: 'ci/security', status: 'PENDING' }
             ]
-        };
-        setPrDetails(mockPr);
-        addLog(AgentRole.REVIEWER, `Opened Pull Request #${mockPr.id}`, 'info');
+        });
+    }
 
-        addLog(AgentRole.REVIEWER, "Running code analysis...");
-        const codeReviews = await geminiService.reviewCode(files);
-        setReviews(codeReviews);
-        
-        if (codeReviews.length === 0 || codeReviews.every(r => r.severity === 'LOW')) {
-            addLog(AgentRole.REVIEWER, "Code review passed.", 'success');
-        } else {
-            addLog(AgentRole.REVIEWER, `Found ${codeReviews.length} issues.`, 'warning');
-        }
-        
-        await new Promise(r => setTimeout(r, 1000));
+    try {
+      addLog(AgentRole.DEVOPS, `Starting feature build on ${featureBranch}...`);
+      const buildSteps = [
+          "Initializing build agent...",
+          "Cloning repository...",
+          "Installing dependencies...",
+          "Running linter...",
+          "Running integration tests...",
+          "Building preview artifacts...",
+          "Deploying to preview environment..."
+      ];
 
-        // 5. CI Checks & Build Feature Branch (DevOps)
-        setStage(WorkflowStage.CHECKS);
-        setActiveTab('build');
-        addLog(AgentRole.DEVOPS, `Running CI pipeline on ${featureBranch || 'feature'}...`);
+      for (const step of buildSteps) {
+          addBuildLog(`[${new Date().toISOString().split('T')[1].split('.')[0]}] ${step}`);
+          await new Promise(r => setTimeout(r, 400));
+      }
 
-        const buildSteps = [
-            "Initializing build agent...",
-            "Cloning repository...",
-            "Installing dependencies...",
-            "Running linter...",
-            "Running unit tests...",
-            "Building preview artifacts...",
-            "Deploying to preview environment..."
-        ];
+      addLog(AgentRole.DEVOPS, "Build successful. Preview environment ready.", 'success');
+      
+      setPrDetails(prev => prev ? ({
+          ...prev,
+          checks: [
+              { name: 'ci/lint', status: 'PASS' },
+              { name: 'ci/test', status: 'PASS' },
+              { name: 'ci/security', status: 'PASS' }
+          ]
+      }) : null);
 
-        for (const step of buildSteps) {
-            addBuildLog(`[${new Date().toISOString().split('T')[1].split('.')[0]}] ${step}`);
-            await new Promise(r => setTimeout(r, 400));
-        }
-
-        addLog(AgentRole.DEVOPS, "Build successful. Preview environment ready.", 'success');
-        
-        setPrDetails(prev => prev ? ({
-            ...prev,
-            checks: [
-                { name: 'ci/lint', status: 'PASS' },
-                { name: 'ci/test', status: 'PASS' },
-                { name: 'ci/security', status: 'PASS' }
-            ]
-        }) : null);
-
-        // 6. PAUSE FOR APPROVAL
-        setStage(WorkflowStage.AWAITING_APPROVAL);
-        setActiveTab('pr'); 
-        addLog(AgentRole.REVIEWER, "Pipeline passed. Waiting for user approval.", 'warning');
-
-    } catch (error: any) {
-        addLog(AgentRole.DEVOPS, `Workflow failed: ${error.message}`, 'error');
-        setStage(WorkflowStage.IDLE);
+      setActiveTab('preview');
+      setStage(WorkflowStage.APPROVE_PREVIEW);
+    } catch (e: any) {
+      addLog(AgentRole.DEVOPS, `Build failed: ${e.message}`, 'error');
     }
   };
 
-  const handleApproveMerge = async () => {
-      // 7. Merge (DevOps)
-      addLog(AgentRole.DEVOPS, `User approved. Merging PR #${prDetails?.id} to ${selectedRepo?.branch || 'main'}...`);
+  // PHASE 5: Deploy to UAT/Prod
+  const runDeployment = async () => {
+    setStage(WorkflowStage.DEPLOYING);
+    setChangeRequestFeedback('');
+    try {
+      addLog(AgentRole.DEVOPS, `Merging PR #${prDetails?.id} to ${selectedRepo?.branch || 'main'}...`);
       await new Promise(r => setTimeout(r, 1000));
       
       setTasks(prev => prev.map(t => ({ ...t, status: 'DONE' })));
       setPrDetails(prev => prev ? ({ ...prev, status: 'MERGED' }) : null);
       
       addLog(AgentRole.DEVOPS, "Merge complete.", 'success');
+      addLog(AgentRole.DEVOPS, "Deploying to UAT environment...", 'info');
+      await new Promise(r => setTimeout(r, 1500));
+      addLog(AgentRole.DEVOPS, "UAT Deployment Successful.", 'success');
       
       setSummary([
          `Implemented ${stories.length} user stories`,
          `Merged PR #${prDetails?.id} into ${selectedRepo?.branch || 'main'}`,
          `Verified ${tasks.length} tasks`,
-         `Deployed feature preview for verification`
+         `Deployed to UAT for final acceptance`
       ]);
       
       setStage(WorkflowStage.DONE);
       setActiveTab('done');
+    } catch (e: any) {
+       addLog(AgentRole.DEVOPS, `Deploy failed: ${e.message}`, 'error');
+    }
+  };
+
+  // --- Handlers ---
+
+  const handleApprove = () => {
+    switch (stage) {
+      case WorkflowStage.APPROVE_REQUIREMENTS:
+        runPlanning();
+        break;
+      case WorkflowStage.APPROVE_PLANNING:
+        runCoding();
+        break;
+      case WorkflowStage.APPROVE_CODE:
+        runChecks();
+        break;
+      case WorkflowStage.APPROVE_PREVIEW:
+        runDeployment();
+        break;
+    }
   };
 
   const handleDiscard = () => {
@@ -266,27 +323,71 @@ export default function App() {
   const handleSubmitRework = () => {
      if (!changeRequestFeedback.trim()) return;
      
-     addLog(AgentRole.PRODUCT_OWNER, `Feedback received: "${changeRequestFeedback}". Reworking plan...`, 'warning');
+     addLog(AgentRole.PRODUCT_OWNER, `Feedback received: "${changeRequestFeedback}". Reworking...`, 'warning');
      
-     // Reset relevant state
-     setCodeFiles([]);
-     setReviews([]);
-     setPrDetails(null);
-     setBuildLogs([]);
+     const currentStage = stage;
      setIsRequestingChanges(false);
-     setChangeRequestFeedback('');
      
-     // Simulate rework by going back to planning stage
-     executeWorkflowSteps(WorkflowStage.PLANNING);
+     // Route back based on current approval stage
+     if (currentStage === WorkflowStage.APPROVE_REQUIREMENTS) {
+        runRequirements();
+     } else if (currentStage === WorkflowStage.APPROVE_PLANNING) {
+        runPlanning();
+     } else if (currentStage === WorkflowStage.APPROVE_CODE) {
+        runCoding(); // Re-run coding with feedback
+     } else if (currentStage === WorkflowStage.APPROVE_PREVIEW) {
+        runCoding(); // Go back to coding if preview is rejected
+     }
   };
 
-  // --- Render Content based on Tabs ---
-  
+  // --- UI Helpers ---
+
+  const getApprovalContext = () => {
+    switch(stage) {
+      case WorkflowStage.APPROVE_REQUIREMENTS:
+        return { 
+          title: "Review User Stories", 
+          desc: "Confirm requirements before planning.",
+          btn: "Approve Stories",
+          tab: "stories"
+        };
+      case WorkflowStage.APPROVE_PLANNING:
+        return { 
+          title: "Review Development Plan", 
+          desc: "Confirm Jira tasks before coding.",
+          btn: "Approve Plan",
+          tab: "tasks"
+        };
+      case WorkflowStage.APPROVE_CODE:
+        return { 
+          title: "Review Code & Tests", 
+          desc: "Verify implementation and test results.",
+          btn: "Approve Code",
+          tab: "pr" // or code
+        };
+      case WorkflowStage.APPROVE_PREVIEW:
+        return { 
+          title: "Verify Feature Preview", 
+          desc: "Check the deployed feature in the preview environment.",
+          btn: "Merge & Deploy UAT",
+          tab: "preview"
+        };
+      default:
+        return null;
+    }
+  };
+
+  const approvalCtx = getApprovalContext();
+  const isApprovalStage = !!approvalCtx;
+  const activeRole = getActiveAgentRole(stage);
+
+  // --- Render ---
+
   const renderContent = () => {
     switch (activeTab) {
       case 'stories':
         return (
-          <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 pb-24">
             {stories.length === 0 && <div className="text-slate-500 p-4 italic">Waiting for Product Owner...</div>}
             {stories.map(story => (
               <div key={story.id} className="bg-slate-900 border border-slate-800 p-4 rounded-lg hover:border-slate-700 transition-colors">
@@ -307,7 +408,7 @@ export default function App() {
         );
       case 'tasks':
         return (
-          <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-3 pb-24">
              {tasks.length === 0 && <div className="text-slate-500 p-4 italic">Waiting for Architect...</div>}
              {['TODO', 'IN_PROGRESS', 'CODE_REVIEW', 'DONE'].map(status => {
                 const statusTasks = tasks.filter(t => t.status === status);
@@ -338,7 +439,7 @@ export default function App() {
         );
       case 'code':
         return (
-          <div className="space-y-4">
+          <div className="space-y-4 pb-24">
              {codeFiles.length === 0 && <div className="text-slate-500 p-4 italic">Waiting for Developer...</div>}
              {codeFiles.map((file, idx) => (
                <div key={idx} className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden group">
@@ -357,11 +458,11 @@ export default function App() {
           </div>
         );
       case 'pr':
-        if (!prDetails) return <div className="text-slate-500 p-4 italic">No active Pull Request.</div>;
+        if (!reviews.length && !prDetails) return <div className="text-slate-500 p-4 italic">Waiting for Code...</div>;
         return (
-          <div className="space-y-6 pb-20"> {/* Added padding for sticky footer */}
+          <div className="space-y-6 pb-24"> 
             <div className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
-              {/* PR Header */}
+              {prDetails && (
               <div className="p-6 border-b border-slate-800">
                 <div className="flex items-center gap-3 mb-4">
                     <div className={`px-3 py-1 rounded-full text-sm font-medium border ${
@@ -380,19 +481,13 @@ export default function App() {
                     <span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300">{prDetails.toBranch}</span>
                 </div>
               </div>
+              )}
 
-              {/* PR Layout */}
               <div className="flex flex-col lg:flex-row">
                 <div className="flex-1 p-6 space-y-6">
+                    {prDetails && (
                     <div>
-                      <h3 className="text-sm font-bold text-slate-200 mb-2">Description</h3>
-                      <div className="text-slate-400 text-sm bg-slate-950/50 p-3 rounded border border-slate-800">
-                        {prDetails.description}
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-200 mb-2">Checks & Deployments</h3>
+                      <h3 className="text-sm font-bold text-slate-200 mb-2">Checks</h3>
                       <div className="space-y-2">
                         {prDetails.checks.map((check, i) => (
                             <div key={i} className="flex items-center justify-between bg-slate-950 p-2 rounded border border-slate-800">
@@ -406,18 +501,18 @@ export default function App() {
                               <span className="text-xs text-slate-500 font-mono">{check.status}</span>
                             </div>
                         ))}
-                        {/* Preview Environment Badge */}
-                        {(stage === WorkflowStage.AWAITING_APPROVAL || stage === WorkflowStage.DONE) && (
-                            <div className="flex items-center justify-between bg-blue-900/10 p-2 rounded border border-blue-900/30 mt-2 cursor-pointer hover:bg-blue-900/20 transition-colors" onClick={() => setActiveTab('preview')}>
-                               <div className="flex items-center gap-2 text-sm text-blue-200">
-                                  <ExternalLink size={14} /> Feature Preview
-                               </div>
-                               <span className="text-xs text-blue-400 font-mono truncate max-w-[200px]">
-                                  Deployed
-                               </span>
-                            </div>
-                        )}
                       </div>
+                    </div>
+                    )}
+                    
+                    {/* Explicit Unit Test Section */}
+                    <div>
+                        <h3 className="text-sm font-bold text-slate-200 mb-2">Unit Tests</h3>
+                        <div className="bg-slate-950 p-3 rounded border border-slate-800 text-sm font-mono text-green-400">
+                           <div className="flex items-center gap-2 mb-1"><CheckCircle size={14}/> auth.test.ts (4/4 passed)</div>
+                           <div className="flex items-center gap-2 mb-1"><CheckCircle size={14}/> user.test.ts (2/2 passed)</div>
+                           <div className="flex items-center gap-2"><CheckCircle size={14}/> api.test.ts (6/6 passed)</div>
+                        </div>
                     </div>
                 </div>
 
@@ -445,88 +540,11 @@ export default function App() {
                 </div>
               </div>
             </div>
-
-            {/* Approval Gate - Sticky Bottom */}
-            {stage === WorkflowStage.AWAITING_APPROVAL && (
-              <div className="sticky bottom-4 bg-slate-900 border border-blue-700/50 rounded-xl shadow-2xl shadow-black/50 overflow-hidden animate-in slide-in-from-bottom-4 duration-500 z-10">
-                
-                {/* Gate Header */}
-                <div className="bg-slate-800/50 px-6 py-3 flex items-center justify-between border-b border-slate-800/50">
-                   <div className="flex items-center gap-2 text-blue-400 font-bold text-sm uppercase tracking-wider">
-                      <UserCheck size={16} /> Approval Gate
-                   </div>
-                   <div className="text-xs text-slate-400">Review pending</div>
-                </div>
-
-                <div className="p-6">
-                  {!isRequestingChanges ? (
-                    <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-                       <div className="flex items-start gap-4">
-                          <div className="p-3 bg-green-900/20 rounded-full text-green-500 border border-green-900/30">
-                             <CheckCircle size={24} />
-                          </div>
-                          <div>
-                            <h3 className="font-bold text-slate-200 text-lg">Readiness Check Passed</h3>
-                            <p className="text-sm text-slate-400 mt-1">
-                              Code implementation complete. CI checks passed. Preview deployed.
-                            </p>
-                          </div>
-                       </div>
-                       
-                       <div className="flex items-center gap-3 w-full md:w-auto">
-                          <button 
-                             onClick={handleDiscard}
-                             className="px-4 py-2.5 text-red-400 hover:bg-red-900/20 hover:text-red-300 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 border border-transparent hover:border-red-900/30"
-                          >
-                             <XCircle size={16} /> Discard
-                          </button>
-                          <button 
-                             onClick={() => setIsRequestingChanges(true)}
-                             className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-2 border border-slate-700"
-                          >
-                             <MessageSquare size={16} /> Request Changes
-                          </button>
-                          <button 
-                            onClick={handleApproveMerge}
-                            className="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg shadow-lg shadow-green-900/20 flex items-center gap-2 transition-all"
-                          >
-                            Approve & Merge <ArrowRight size={16} />
-                          </button>
-                       </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4 animate-in fade-in duration-300">
-                        <div className="flex items-center justify-between">
-                           <h3 className="font-bold text-slate-200">Describe required changes</h3>
-                           <button onClick={() => setIsRequestingChanges(false)} className="text-slate-500 hover:text-slate-300"><XCircle size={18}/></button>
-                        </div>
-                        <textarea 
-                           className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-slate-200 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none h-24"
-                           placeholder="E.g. The login button contrast is too low, and we are missing a unit test for the auth service..."
-                           value={changeRequestFeedback}
-                           onChange={(e) => setChangeRequestFeedback(e.target.value)}
-                           autoFocus
-                        />
-                        <div className="flex justify-end gap-3">
-                           <button onClick={() => setIsRequestingChanges(false)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
-                           <button 
-                              onClick={handleSubmitRework}
-                              disabled={!changeRequestFeedback.trim()}
-                              className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                           >
-                              <RotateCcw size={16} /> Submit & Rework
-                           </button>
-                        </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         );
       case 'build':
         return (
-          <div className="bg-black rounded-lg border border-slate-800 overflow-hidden font-mono text-sm shadow-2xl">
+          <div className="bg-black rounded-lg border border-slate-800 overflow-hidden font-mono text-sm shadow-2xl pb-24">
              <div className="bg-slate-900 p-2 border-b border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                    <Terminal size={14} className="text-slate-400" />
@@ -538,7 +556,7 @@ export default function App() {
                       Running CI
                    </div>
                 )}
-                 {(stage === WorkflowStage.AWAITING_APPROVAL || stage === WorkflowStage.DONE) && (
+                 {(stage === WorkflowStage.APPROVE_PREVIEW || stage === WorkflowStage.DONE) && (
                    <div className="flex items-center gap-2 text-green-500 text-xs">
                       <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                       Success
@@ -557,8 +575,8 @@ export default function App() {
         );
       case 'preview':
         return (
-          <div className="h-96 bg-slate-100 rounded-lg border border-slate-800 flex items-center justify-center text-slate-900 relative overflow-hidden">
-             {(stage === WorkflowStage.AWAITING_APPROVAL || stage === WorkflowStage.DONE || stage === WorkflowStage.CHECKS) ? (
+          <div className="h-96 bg-slate-100 rounded-lg border border-slate-800 flex items-center justify-center text-slate-900 relative overflow-hidden pb-24">
+             {(stage === WorkflowStage.APPROVE_PREVIEW || stage === WorkflowStage.DONE || stage === WorkflowStage.DEPLOYING) ? (
                <div className="text-center animate-in zoom-in duration-500">
                  <div className="w-20 h-20 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-6 text-white shadow-xl shadow-blue-500/20">
                    <ExternalLink size={40} />
@@ -577,8 +595,8 @@ export default function App() {
                </div>
              ) : (
                <div className="flex flex-col items-center text-slate-400">
-                  <Layers size={64} className="mb-6 opacity-10" />
-                  <p>Build pending...</p>
+                  <Rocket size={64} className="mb-6 opacity-10" />
+                  <p>Deployment pending...</p>
                </div>
              )}
           </div>
@@ -618,8 +636,6 @@ export default function App() {
     }
   };
 
-  const activeRole = getActiveAgentRole(stage);
-
   return (
     <div className="flex h-screen bg-slate-950 text-slate-200 selection:bg-blue-500/30 font-sans">
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
@@ -637,7 +653,7 @@ export default function App() {
       />
 
       {/* Main Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden relative">
         {/* Header */}
         <header className="h-16 border-b border-slate-800 bg-slate-950 flex items-center justify-between px-8 flex-shrink-0">
           <div>
@@ -699,7 +715,7 @@ export default function App() {
                  </>
               )}
               
-              <div className={`relative group transition-all duration-500 ${stage !== WorkflowStage.IDLE ? 'scale-90 opacity-80' : 'scale-100'}`}>
+              <div className={`relative group transition-all duration-500 ${stage !== WorkflowStage.IDLE ? 'scale-90 opacity-80 pointer-events-none' : 'scale-100'}`}>
                 <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
                 <div className="relative bg-slate-900 rounded-xl p-1 flex items-center shadow-2xl">
                   <input 
@@ -775,7 +791,7 @@ export default function App() {
                       tabs={[
                         { id: 'stories', label: 'Stories' },
                         { id: 'tasks', label: 'Tasks' },
-                        { id: 'code', label: 'Changes' },
+                        { id: 'code', label: 'Code' },
                         { id: 'pr', label: 'Pull Request' },
                         { id: 'build', label: 'Build Logs' },
                         { id: 'preview', label: 'Preview' },
@@ -791,6 +807,83 @@ export default function App() {
             )}
           </div>
         </main>
+
+        {/* Dynamic Approval Gate - Sticky Bottom */}
+        {isApprovalStage && (
+            <div className="absolute bottom-6 left-0 right-0 max-w-4xl mx-auto px-4 z-50">
+              <div className="bg-slate-900/95 backdrop-blur border border-blue-700/50 rounded-xl shadow-2xl shadow-black/80 overflow-hidden animate-in slide-in-from-bottom-4 duration-500">
+                
+                {/* Gate Header */}
+                <div className="bg-slate-800/50 px-6 py-3 flex items-center justify-between border-b border-slate-800/50">
+                   <div className="flex items-center gap-2 text-blue-400 font-bold text-sm uppercase tracking-wider">
+                      <UserCheck size={16} /> Approval Gate
+                   </div>
+                   <div className="text-xs text-slate-400">Human-in-the-Loop</div>
+                </div>
+
+                <div className="p-6">
+                  {!isRequestingChanges ? (
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                       <div className="flex items-start gap-4">
+                          <div className="p-3 bg-green-900/20 rounded-full text-green-500 border border-green-900/30">
+                             <CheckCircle size={24} />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-slate-200 text-lg">{approvalCtx.title}</h3>
+                            <p className="text-sm text-slate-400 mt-1">{approvalCtx.desc}</p>
+                          </div>
+                       </div>
+                       
+                       <div className="flex items-center gap-3 w-full md:w-auto">
+                          <button 
+                             onClick={handleDiscard}
+                             className="px-4 py-2.5 text-red-400 hover:bg-red-900/20 hover:text-red-300 rounded-lg font-medium text-sm transition-colors flex items-center gap-2 border border-transparent hover:border-red-900/30"
+                          >
+                             <XCircle size={16} /> Discard
+                          </button>
+                          <button 
+                             onClick={() => setIsRequestingChanges(true)}
+                             className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-2 border border-slate-700"
+                          >
+                             <MessageSquare size={16} /> Request Changes
+                          </button>
+                          <button 
+                            onClick={handleApprove}
+                            className="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg shadow-lg shadow-green-900/20 flex items-center gap-2 transition-all"
+                          >
+                             {approvalCtx.btn} <ArrowRight size={16} />
+                          </button>
+                       </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 animate-in fade-in duration-300">
+                        <div className="flex items-center justify-between">
+                           <h3 className="font-bold text-slate-200">Describe required changes to {approvalCtx.title.toLowerCase()}</h3>
+                           <button onClick={() => setIsRequestingChanges(false)} className="text-slate-500 hover:text-slate-300"><XCircle size={18}/></button>
+                        </div>
+                        <textarea 
+                           className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-slate-200 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none h-24"
+                           placeholder="Describe what needs to be fixed..."
+                           value={changeRequestFeedback}
+                           onChange={(e) => setChangeRequestFeedback(e.target.value)}
+                           autoFocus
+                        />
+                        <div className="flex justify-end gap-3">
+                           <button onClick={() => setIsRequestingChanges(false)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
+                           <button 
+                              onClick={handleSubmitRework}
+                              disabled={!changeRequestFeedback.trim()}
+                              className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                           >
+                              <RotateCcw size={16} /> Submit & Rework
+                           </button>
+                        </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+        )}
       </div>
     </div>
   );
