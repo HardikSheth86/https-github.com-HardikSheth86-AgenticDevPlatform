@@ -1,6 +1,6 @@
 import React from 'react';
 import { WorkflowStage } from '../types';
-import { CheckCircle2, Circle, Loader2, UserCheck, PlayCircle, FileText, Trello, Code2, Rocket } from 'lucide-react';
+import { CheckCircle2, Circle, Loader2, UserCheck, PlayCircle, FileText, Trello, Code2, Rocket, RefreshCw } from 'lucide-react';
 
 interface WorkflowStepsProps {
   currentStage: WorkflowStage;
@@ -25,7 +25,7 @@ const WorkflowSteps: React.FC<WorkflowStepsProps> = ({ currentStage }) => {
       id: 'code', 
       label: 'Code', 
       icon: Code2,
-      stages: [WorkflowStage.CODING, WorkflowStage.REVIEW, WorkflowStage.APPROVE_CODE] 
+      stages: [WorkflowStage.CODING, WorkflowStage.REVIEW, WorkflowStage.APPROVE_CODE, WorkflowStage.ONBOARDING] 
     },
     { 
       id: 'build', 
@@ -42,6 +42,9 @@ const WorkflowSteps: React.FC<WorkflowStepsProps> = ({ currentStage }) => {
   ];
 
   const getStepStatus = (stepStages: WorkflowStage[]) => {
+    // If the entire workflow is DONE, mark everything as completed
+    if (currentStage === WorkflowStage.DONE) return 'completed';
+
     // Current active stage index in the global enum order isn't strictly necessary if we check inclusion
     // but we need to know if a step is "past".
     
@@ -50,6 +53,7 @@ const WorkflowSteps: React.FC<WorkflowStepsProps> = ({ currentStage }) => {
       WorkflowStage.IDLE,
       WorkflowStage.REQUIREMENTS, WorkflowStage.APPROVE_REQUIREMENTS,
       WorkflowStage.PLANNING, WorkflowStage.APPROVE_PLANNING,
+      WorkflowStage.ONBOARDING, // Insert onboarding here in logical flow
       WorkflowStage.CODING, WorkflowStage.REVIEW, WorkflowStage.APPROVE_CODE,
       WorkflowStage.CHECKS, WorkflowStage.APPROVE_PREVIEW,
       WorkflowStage.DEPLOYING, WorkflowStage.DONE
@@ -57,7 +61,6 @@ const WorkflowSteps: React.FC<WorkflowStepsProps> = ({ currentStage }) => {
 
     const currentIndex = stageOrder.indexOf(currentStage);
     const stepMaxIndex = Math.max(...stepStages.map(s => stageOrder.indexOf(s)));
-    const stepMinIndex = Math.min(...stepStages.map(s => stageOrder.indexOf(s)));
 
     if (stepStages.includes(currentStage)) {
         // Check if it's an approval stage within this step (effectively "done" with the active work, waiting on user)
@@ -79,6 +82,7 @@ const WorkflowSteps: React.FC<WorkflowStepsProps> = ({ currentStage }) => {
         {steps.map((step) => {
           const status = getStepStatus(step.stages);
           const Icon = step.icon;
+          const isSpecialOnboarding = currentStage === WorkflowStage.ONBOARDING && step.id === 'code';
           
           return (
             <div key={step.id} className="flex flex-col items-center gap-2 relative bg-slate-950 px-2 min-w-[80px]">
@@ -90,7 +94,7 @@ const WorkflowSteps: React.FC<WorkflowStepsProps> = ({ currentStage }) => {
                   'bg-slate-900 border-slate-700 text-slate-600'}
               `}>
                 {status === 'completed' ? <CheckCircle2 size={20} /> : 
-                 status === 'active' ? <Loader2 size={20} className="animate-spin" /> : 
+                 status === 'active' ? (isSpecialOnboarding ? <RefreshCw size={20} className="animate-spin" /> : <Loader2 size={20} className="animate-spin" />) : 
                  status === 'waiting' ? <UserCheck size={20} className="animate-pulse" /> :
                  Icon ? <Icon size={18} /> : <Circle size={20} />}
               </div>

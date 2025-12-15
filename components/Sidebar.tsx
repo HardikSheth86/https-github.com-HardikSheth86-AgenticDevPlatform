@@ -1,5 +1,5 @@
 import React from 'react';
-import { GitBranch, GitPullRequest, Layout, Box, Settings, Star, Plus, Github, Sparkles, FolderPlus } from 'lucide-react';
+import { GitBranch, GitPullRequest, Layout, Box, Settings, Star, Github, Sparkles, FolderPlus, Command, Plus } from 'lucide-react';
 import { Repository } from '../types';
 
 interface SidebarProps {
@@ -7,108 +7,133 @@ interface SidebarProps {
   selectedRepoId: string | null;
   onSelectRepo: (id: string | null) => void;
   onSettingsClick: () => void;
+  currentView: 'workspace' | 'chat';
+  onViewChange: (view: 'workspace' | 'chat') => void;
+  onAddRepoClick: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ repos, selectedRepoId, onSelectRepo, onSettingsClick }) => {
+const Sidebar: React.FC<SidebarProps> = ({ repos, selectedRepoId, onSelectRepo, onSettingsClick, currentView, onViewChange, onAddRepoClick }) => {
   return (
-    <div className="w-64 bg-slate-950 border-r border-slate-800 flex flex-col h-screen">
+    <div className="w-64 bg-[#0d1117] border-r border-slate-800 flex flex-col h-screen font-sans">
       {/* Logo Area */}
-      <div className="h-16 flex items-center gap-3 px-4 border-b border-slate-800">
-        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold shadow-lg shadow-blue-900/50">
-          A
+      <div className="h-16 flex items-center gap-3 px-4 border-b border-slate-800 bg-[#161b22]">
+        <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center text-[#0d1117] shadow-lg shadow-purple-900/20">
+          <Github size={20} fill="#0d1117" />
         </div>
-        <span className="font-bold text-slate-200 tracking-tight">AgenticDev</span>
+        <div className="flex flex-col">
+            <span className="font-bold text-white tracking-tight leading-none text-sm">GitHub Copilot</span>
+            <span className="text-[10px] text-slate-400 font-mono">BMAD Studio</span>
+        </div>
       </div>
 
       {/* Navigation */}
       <div className="p-3 space-y-1">
-        <button className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-900 rounded-md transition-colors">
-          <Layout size={18} />
-          Dashboard
+        <button 
+          onClick={() => onViewChange('workspace')}
+          className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+            currentView === 'workspace' 
+              ? 'bg-blue-900/20 text-blue-400 border border-blue-900/50' 
+              : 'text-slate-400 hover:text-white hover:bg-slate-800 border border-transparent'
+          }`}
+        >
+          <Layout size={16} />
+          Workspace
         </button>
-        <button className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-900 rounded-md transition-colors">
-          <Box size={18} />
-          Packages
+        <button 
+          onClick={() => onViewChange('chat')}
+          className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+            currentView === 'chat' 
+              ? 'bg-blue-900/20 text-blue-400 border border-blue-900/50' 
+              : 'text-slate-400 hover:text-white hover:bg-slate-800 border border-transparent'
+          }`}
+        >
+          <Command size={16} />
+          Copilot Chat
         </button>
       </div>
 
       {/* Repositories Header */}
       <div className="px-4 pt-4 pb-2 flex items-center justify-between">
         <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-          Projects
-          <span className="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-[10px]">{repos.length}</span>
+          Repositories
         </h3>
+        <button 
+           onClick={onAddRepoClick}
+           className="text-slate-500 hover:text-white p-1 hover:bg-slate-800 rounded transition-colors" 
+           title="Import Repository"
+        >
+           <Plus size={14} />
+        </button>
       </div>
 
       {/* Repo List */}
       <div className="flex-1 overflow-y-auto px-3 space-y-1">
-        {/* New Project Button */}
+        {/* Add Existing Repo Button */}
         <button
-          onClick={() => onSelectRepo(null)}
-          className={`w-full text-left p-3 rounded-lg border mb-3 flex items-center gap-3 transition-all group ${
-            selectedRepoId === null
-              ? 'bg-blue-900/20 border-blue-500/50 text-blue-400 shadow-md shadow-blue-900/20'
-              : 'bg-slate-900/30 border-slate-800 text-slate-400 hover:bg-slate-900 hover:border-slate-700 hover:text-slate-200'
-          }`}
+          onClick={onAddRepoClick}
+          className="w-full text-left p-3 rounded-lg border mb-3 flex items-center gap-3 transition-all group bg-[#161b22] border-slate-800 text-slate-400 hover:border-slate-600 hover:text-slate-200"
         >
-          <div className={`p-1.5 rounded-md ${selectedRepoId === null ? 'bg-blue-500 text-white' : 'bg-slate-800 group-hover:bg-slate-700'}`}>
+          <div className="p-1.5 rounded-md bg-slate-800 group-hover:bg-slate-700">
              <FolderPlus size={16} />
           </div>
-          <span className="font-bold text-sm">Create New Project</span>
+          <span className="font-semibold text-sm">Add Existing Repo</span>
         </button>
 
         {repos.map((repo) => (
           <button
             key={repo.id}
-            onClick={() => onSelectRepo(repo.id)}
-            className={`w-full text-left p-3 rounded-lg border transition-all group ${
-              selectedRepoId === repo.id
-                ? 'bg-slate-900 border-blue-500/50 shadow-md shadow-blue-900/20'
-                : 'bg-transparent border-transparent hover:bg-slate-900/50 hover:border-slate-800'
+            onClick={() => {
+              onSelectRepo(repo.id);
+              onViewChange('workspace');
+            }}
+            className={`w-full text-left p-2.5 rounded-md border transition-all group ${
+              selectedRepoId === repo.id && currentView === 'workspace'
+                ? 'bg-[#161b22] border-slate-600'
+                : 'bg-transparent border-transparent hover:bg-slate-800/50'
             }`}
           >
             <div className="flex items-center justify-between mb-1">
-              <span className={`font-medium text-sm truncate max-w-[120px] ${selectedRepoId === repo.id ? 'text-blue-400' : 'text-slate-300 group-hover:text-slate-200'}`}>
+              <span className={`font-medium text-sm truncate max-w-[120px] ${selectedRepoId === repo.id ? 'text-white' : 'text-slate-400 group-hover:text-slate-300'}`}>
                 {repo.name}
               </span>
               {repo.source === 'google-studio' ? (
-                <span className="text-[10px] text-purple-300 bg-purple-900/30 border border-purple-800 px-1 rounded flex items-center gap-1">
-                   <Sparkles size={8} /> AI Studio
-                </span>
+                <span className="text-[10px] text-purple-400"><Sparkles size={10} /></span>
               ) : (
-                <span className="text-[10px] text-slate-500 border border-slate-800 px-1 rounded flex items-center gap-1">
-                   <Github size={8} /> Git
-                </span>
+                <span className="text-[10px] text-slate-500"><Github size={10} /></span>
               )}
             </div>
-            <p className="text-xs text-slate-500 truncate mb-2">{repo.description}</p>
-            <div className="flex items-center gap-3 text-xs text-slate-600">
+            <div className="flex items-center gap-3 text-xs text-slate-500">
               <div className="flex items-center gap-1">
-                <GitBranch size={12} />
+                <GitBranch size={10} />
                 {repo.branch}
               </div>
               <div className="flex items-center gap-1">
-                <Star size={12} />
+                <Star size={10} />
                 {repo.stars}
               </div>
-              {repo.openPrs > 0 && (
-                <div className="flex items-center gap-1 text-green-600/70">
-                  <GitPullRequest size={12} />
-                  {repo.openPrs}
-                </div>
-              )}
             </div>
           </button>
         ))}
       </div>
 
       {/* Bottom Actions */}
-      <div className="p-4 border-t border-slate-800">
+      <div className="p-4 border-t border-slate-800 bg-[#161b22]">
+         <div className="flex items-center gap-3 mb-4">
+             <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500 to-blue-500 p-0.5">
+                <div className="w-full h-full rounded-full bg-[#0d1117] flex items-center justify-center">
+                   <Sparkles size={14} className="text-white" />
+                </div>
+             </div>
+             <div>
+                <div className="text-xs font-bold text-white">Copilot Enterprise</div>
+                <div className="text-[10px] text-slate-400">BMAD Framework Active</div>
+             </div>
+         </div>
          <button 
           onClick={onSettingsClick}
-          className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-900 rounded-md transition-colors"
+          className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition-colors"
          >
-          <Settings size={18} />
+          <Settings size={16} />
           Settings
         </button>
       </div>

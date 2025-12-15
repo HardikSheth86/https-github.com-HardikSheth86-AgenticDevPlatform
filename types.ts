@@ -1,23 +1,24 @@
 export enum AgentRole {
-  PRODUCT_OWNER = 'PRODUCT_OWNER',
-  ARCHITECT = 'ARCHITECT',
-  DEVELOPER = 'DEVELOPER',
-  REVIEWER = 'REVIEWER',
-  DEVOPS = 'DEVOPS'
+  BMAD_ORCHESTRATOR = 'BMAD_ORCHESTRATOR', // Manager
+  COPILOT_WORKSPACE = 'COPILOT_WORKSPACE', // PM / Architect
+  COPILOT_CORE = 'COPILOT_CORE',           // Developer
+  COPILOT_SECURITY = 'COPILOT_SECURITY',   // Reviewer / CodeQL
+  GITHUB_ACTIONS = 'GITHUB_ACTIONS'        // DevOps / Runner
 }
 
 export enum WorkflowStage {
   IDLE = 'IDLE',
+  ONBOARDING = 'ONBOARDING', // New stage for repository onboarding
   REQUIREMENTS = 'REQUIREMENTS',
-  APPROVE_REQUIREMENTS = 'APPROVE_REQUIREMENTS', // HITL 1
+  APPROVE_REQUIREMENTS = 'APPROVE_REQUIREMENTS',
   PLANNING = 'PLANNING',
-  APPROVE_PLANNING = 'APPROVE_PLANNING', // HITL 2
+  APPROVE_PLANNING = 'APPROVE_PLANNING',
   CODING = 'CODING',
   REVIEW = 'REVIEW',
-  APPROVE_CODE = 'APPROVE_CODE', // HITL 3 (Code + Tests + Review)
+  APPROVE_CODE = 'APPROVE_CODE',
   CHECKS = 'CHECKS',
-  APPROVE_PREVIEW = 'APPROVE_PREVIEW', // HITL 4 (Feature Build + Preview)
-  DEPLOYING = 'DEPLOYING', // Merge + UAT
+  APPROVE_PREVIEW = 'APPROVE_PREVIEW',
+  DEPLOYING = 'DEPLOYING',
   DONE = 'DONE'
 }
 
@@ -30,7 +31,7 @@ export interface UserStory {
 
 export interface DevTask {
   id: string;
-  key: string; // e.g. DEV-101
+  key: string;
   title: string;
   description: string;
   assignee: AgentRole;
@@ -69,6 +70,7 @@ export interface Repository {
   openPrs: number;
   branch: string;
   source: 'github' | 'google-studio';
+  complianceStatus: 'compliant' | 'pending' | 'missing'; // New field
 }
 
 export interface PullRequest {

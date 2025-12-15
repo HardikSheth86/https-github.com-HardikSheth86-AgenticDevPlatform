@@ -1,5 +1,5 @@
 {
-  "name": "AgenticDev OS",
-  "description": "A comprehensive AI agent orchestration platform that automates the software development lifecycle: from user story generation to code creation, review, and simulated deployment.",
+  "name": "GitHub Copilot BMAD Studio",
+  "description": "An agentic IDE powered by GitHub Copilot and the BMAD framework for multi-agent software development.",
   "requestFramePermissions": []
 }
